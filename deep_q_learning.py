@@ -5,14 +5,15 @@ import tensorflow as tf
 from keras.layers import Dense, Input, Lambda, Add
 from keras.models import Model
 from keras import backend as K
+from collections import deque
 
 class deep_q_learning_agent:
     def __init__(self, dueling):
         self.env = environment()
-        self.action_history = []
-        self.state_history = []
-        self.reward_history = []
-        self.next_state_history = []
+        self.action_history = deque(maxlen=memory_size)
+        self.state_history = deque(maxlen=memory_size)
+        self.reward_history = deque(maxlen=memory_size)
+        self.next_state_history = deque(maxlen=memory_size)
 
         self.model = self.create_model(dueling)
         self.target_model = self.create_model(dueling)
@@ -53,32 +54,36 @@ class deep_q_learning_agent:
         self.action_history.append(action)
         self.next_state_history.append(next_state)
         self.reward_history.append(reward)
-        if len(self.reward_history) > memory_size:
-            del self.state_history[:1]
-            del self.action_history[:1]
-            del self.next_state_history[:1]
-            del self.reward_history[:1]
+
+    @tf.function
+    def train_step(self, state_sample, action_sample, reward_sample, next_state_sample):
+        future_rewards = self.target_model(next_state_sample, training=False)
+        updated_q_values = reward_sample + gamma_deepQ * tf.reduce_max(future_rewards, axis=1)
+
+        mask = tf.one_hot(action_sample, num_actions)
+        with tf.GradientTape() as tape:
+            q_values = self.model(state_sample, training=True)
+            q_action = tf.reduce_sum(tf.multiply(q_values, mask), axis=1)
+            loss = self.loss_function(updated_q_values, q_action)
+
+        grads = tape.gradient(loss, self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
 
     def replay(self):
         if len(self.state_history) < batch_size:
             return
         indices = np.random.choice(range(len(self.state_history)), size=batch_size)
         state_sample = np.array([self.state_history[i] for i in indices]).reshape((batch_size, num_features))
-        action_sample = np.array([self.action_history[i] for i in indices])
-        reward_sample = np.array([self.reward_history[i] for i in indices])
+        action_sample = np.array([self.action_history[i] for i in indices], dtype=np.int32)
+        reward_sample = np.array([self.reward_history[i] for i in indices], dtype=np.float32)
         next_state_sample = np.array([self.next_state_history[i] for i in indices]).reshape((batch_size, num_features))
 
-        future_rewards = self.target_model.predict(next_state_sample, verbose=0)
-        updated_q_values = reward_sample + gamma_deepQ * tf.reduce_max(future_rewards, axis=1)
-
-        mask = tf.one_hot(action_sample, num_actions)
-        with tf.GradientTape() as tape:
-            q_values = self.model(state_sample, training=False)
-            q_action = tf.reduce_sum(tf.multiply(q_values, mask), axis=1)
-            loss = self.loss_function(updated_q_values, q_action)
-
-        grads = tape.gradient(loss, self.model.trainable_variables)
-        self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+        self.train_step(
+            tf.convert_to_tensor(state_sample, dtype=tf.float32),
+            tf.convert_to_tensor(action_sample, dtype=tf.int32),
+            tf.convert_to_tensor(reward_sample, dtype=tf.float32),
+            tf.convert_to_tensor(next_state_sample, dtype=tf.float32)
+        )
 
     def target_update(self):
         self.target_model.set_weights(self.model.get_weights())
@@ -89,7 +94,8 @@ class deep_q_learning_agent:
         if np.random.random() < self.epsilon:
             return np.random.choice(self.env.get_possible_action())
         else:
-            list_value = self.model.predict(state, verbose=0)[0]
+            state_tensor = tf.convert_to_tensor(state, dtype=tf.float32)
+            list_value = self.model(state_tensor, training=False)[0].numpy()
             list_actions = self.env.get_possible_action()
             max_q = -float("inf")
             action = 0
@@ -116,7 +122,7 @@ class deep_q_learning_agent:
             if (i+1) % update_target_network == 0:
                 self.target_update()
             if (i+1) % step == 0:
-                print("Iteration " + str(i + 1) + " reward: " + str(total_reward / (i + 1)))
+                print("deep_q_learning Iteration " + str(i + 1) + " reward: " + str(total_reward / (i + 1)))
 
 if __name__ == "__main__":
     agent = deep_q_learning_agent(dueling=True)

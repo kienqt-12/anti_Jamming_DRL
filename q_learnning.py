@@ -39,7 +39,7 @@ class q_learning_agent:
             temp = epsilon * decay
             epsilon = max(min_epsilon, temp)
             if (i+1) % step == 0:
-                print("Iteration " + str(i + 1) + " reward: " + str(total_reward / (i + 1)))
+                print("q_learnning Iteration " + str(i + 1) + " reward: " + str(total_reward / (i + 1)))
 
 if __name__ == "__main__":
     agent = q_learning_agent()
