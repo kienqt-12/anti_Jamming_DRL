@@ -28,7 +28,7 @@ gamma_deepQ = 0.99      # Hệ số giảm giá cho DQN
 num_features = 3        # Số lượng đặc trưng đầu vào trạng thái (ở đây là 3: jammer, data, energy)
 memory_size = 10000     # Kích thước bộ nhớ trải nghiệm (Replay Buffer) lưu lịch sử để huấn luyện DQN
 batch_size = 32         # Kích thước 1 mẻ dữ liệu (batch) lấy ra từ Replay Buffer để học
-update_target_network = 5000 # Số bước để copy trọng số cập nhật mạng mục tiêu (Target Network)
+update_target_network = 1000 # Số bước để copy trọng số cập nhật mạng mục tiêu (Target Network)
 
 # Không gian trạng thái
 # Tổng số trạng thái = (số trạng thái jammer) * (số mức dữ liệu) * (số mức năng lượng)

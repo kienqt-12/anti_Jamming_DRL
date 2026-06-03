@@ -5,15 +5,17 @@ import tensorflow as tf
 from keras.layers import Dense, Input, Lambda, Add
 from keras.models import Model
 from keras import backend as K
-from collections import deque
 
 class deep_q_learning_agent:
     def __init__(self, dueling):
         self.env = environment()
-        self.action_history = deque(maxlen=memory_size)
-        self.state_history = deque(maxlen=memory_size)
-        self.reward_history = deque(maxlen=memory_size)
-        self.next_state_history = deque(maxlen=memory_size)
+        
+        # Fast pre-allocated NumPy Replay Buffer to speed up training loop
+        self.states = np.zeros((memory_size, num_features), dtype=np.float32)
+        self.actions = np.zeros(memory_size, dtype=np.int32)
+        self.rewards = np.zeros(memory_size, dtype=np.float32)
+        self.next_states = np.zeros((memory_size, num_features), dtype=np.float32)
+        self.memory_counter = 0
 
         self.model = self.create_model(dueling)
         self.target_model = self.create_model(dueling)
@@ -49,16 +51,40 @@ class deep_q_learning_agent:
         model = Model(inputs=X_input, outputs=X)  # create deep neural network
         return model
 
+    def normalize_state(self, state):
+        # Scale queue states from [0, 10] down to [0, 1] to prevent tanh saturation and speed up learning
+        normalized = np.copy(state).astype(np.float32)
+        if len(normalized.shape) == 2:
+            normalized[:, 1] /= d_queue_size
+            normalized[:, 2] /= e_queue_size
+        else:
+            normalized[1] /= d_queue_size
+            normalized[2] /= e_queue_size
+        return normalized
+
     def remember(self, state, action, reward, next_state):
-        self.state_history.append(state)
-        self.action_history.append(action)
-        self.next_state_history.append(next_state)
-        self.reward_history.append(reward)
+        index = self.memory_counter % memory_size
+        self.states[index] = np.reshape(state, (num_features,))
+        self.actions[index] = action
+        self.rewards[index] = reward
+        self.next_states[index] = np.reshape(next_state, (num_features,))
+        self.memory_counter += 1
 
     @tf.function
     def train_step(self, state_sample, action_sample, reward_sample, next_state_sample):
-        future_rewards = self.target_model(next_state_sample, training=False)
-        updated_q_values = reward_sample + gamma_deepQ * tf.reduce_max(future_rewards, axis=1)
+        # Double DQN action selection using online network
+        next_q_online = self.model(next_state_sample, training=False)
+        next_actions = tf.argmax(next_q_online, axis=1, output_type=tf.int32)
+        
+        # Double DQN value evaluation using target network
+        next_q_target = self.target_model(next_state_sample, training=False)
+        
+        # Gather target Q-values corresponding to the online actions
+        batch_indices = tf.range(tf.shape(next_actions)[0], dtype=tf.int32)
+        indices = tf.stack([batch_indices, next_actions], axis=1)
+        future_q_values = tf.gather_nd(next_q_target, indices)
+        
+        updated_q_values = reward_sample + gamma_deepQ * future_q_values
 
         mask = tf.one_hot(action_sample, num_actions)
         with tf.GradientTape() as tape:
@@ -70,13 +96,15 @@ class deep_q_learning_agent:
         self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
 
     def replay(self):
-        if len(self.state_history) < batch_size:
+        max_mem = min(self.memory_counter, memory_size)
+        if max_mem < batch_size:
             return
-        indices = np.random.choice(range(len(self.state_history)), size=batch_size)
-        state_sample = np.array([self.state_history[i] for i in indices]).reshape((batch_size, num_features))
-        action_sample = np.array([self.action_history[i] for i in indices], dtype=np.int32)
-        reward_sample = np.array([self.reward_history[i] for i in indices], dtype=np.float32)
-        next_state_sample = np.array([self.next_state_history[i] for i in indices]).reshape((batch_size, num_features))
+        indices = np.random.choice(max_mem, size=batch_size, replace=False)
+        
+        state_sample = self.states[indices]
+        action_sample = self.actions[indices]
+        reward_sample = self.rewards[indices]
+        next_state_sample = self.next_states[indices]
 
         self.train_step(
             tf.convert_to_tensor(state_sample, dtype=tf.float32),
@@ -88,6 +116,10 @@ class deep_q_learning_agent:
     def target_update(self):
         self.target_model.set_weights(self.model.get_weights())
 
+    @tf.function
+    def predict_q_values(self, state_tensor):
+        return self.model(state_tensor, training=False)
+
     def get_action(self, state):
         self.epsilon *= self.epsilon_decay
         self.epsilon = max(self.epsilon_min, self.epsilon)
@@ -95,7 +127,7 @@ class deep_q_learning_agent:
             return np.random.choice(self.env.get_possible_action())
         else:
             state_tensor = tf.convert_to_tensor(state, dtype=tf.float32)
-            list_value = self.model(state_tensor, training=False)[0].numpy()
+            list_value = self.predict_q_values(state_tensor)[0].numpy()
             list_actions = self.env.get_possible_action()
             max_q = -float("inf")
             action = 0
@@ -110,12 +142,15 @@ class deep_q_learning_agent:
         for i in range(T):
             current_state = self.env.get_state_deep()
             current_state = np.reshape(current_state, (1, num_features))
-            action = self.get_action(current_state)
+            normalized_state = self.normalize_state(current_state)
+            action = self.get_action(normalized_state)
 
             reward, next_state = self.env.perform_action_deep(action)
             next_state = np.reshape(next_state, (1, num_features))
+            normalized_next_state = self.normalize_state(next_state)
+            
             total_reward += reward
-            self.remember(current_state, action, reward, next_state)
+            self.remember(normalized_state, action, reward, normalized_next_state)
 
             self.replay()
 
