@@ -1,0 +1,8 @@
+version: '3.8'
+services:
+  dql_agent:
+    build: .
+    container_name: dql_training_container
+    restart: on-failure
+    volumes:
+      - ./outputs:/app/outputs
