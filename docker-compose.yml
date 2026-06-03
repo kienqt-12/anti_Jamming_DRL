@@ -1,8 +1,16 @@
 version: '3.8'
+
 services:
   dql_agent:
     build: .
     container_name: dql_training_container
     restart: on-failure
+    # --- THÊM ĐOẠN CẤU HÌNH MÔI TRƯỜNG DƯỚI ĐÂY ---
+    environment:
+      - CUDA_VISIBLE_DEVICES=-1
+      - OMP_NUM_THREADS=1
+      - TF_NUM_INTRA_OP_THREADS=1
+      - TF_NUM_INTER_OP_THREADS=1
+    # ---------------------------------------------
     volumes:
       - ./outputs:/app/outputs
