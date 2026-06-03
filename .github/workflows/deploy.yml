@@ -1,0 +1,20 @@
+name: Deploy DQL Agent to Ubuntu Server
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Run Docker Compose
+      run: |
+        mkdir -p ~/dql_project
+        cp -r ./* ~/dql_project/
+        cd ~/dql_project
+        docker compose up --build -d
