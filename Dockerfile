@@ -3,4 +3,4 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-CMD ["python", "deep_q_learning.py"]
+CMD ["python", "main.py", "--mode", "dqn"]
